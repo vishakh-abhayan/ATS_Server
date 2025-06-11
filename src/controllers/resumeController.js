@@ -22,6 +22,8 @@ const analyzeResume = async (req, res, next) => {
       });
     }
 
+    console.log(`Resume file received: ${resumeFile.originalname} (${resumeFile.size} bytes)`);
+
     // Parse resume
     const resumeText = await documentParser.parseDocument(resumeFile);
     
