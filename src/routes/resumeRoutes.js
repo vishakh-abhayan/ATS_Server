@@ -1,4 +1,4 @@
-const express = require('express');
+const logger = require('../utils/logger');
 const router = express.Router();
 const resumeController = require('../controllers/resumeController');
 const { uploadMiddleware } = require('../middleware/fileUpload');
@@ -6,7 +6,14 @@ const { validateAnalysisRequest } = require('../middleware/validation');
 
 // Main analysis endpoint
 router.post(
-  '/analyze',
+   '/analyze',
+  (req, res, next) => {
+    logger.info('Analysis request received', {
+      files: req.files,
+      body: req.body,
+    });
+    next();
+  },
   uploadMiddleware.fields([
     { name: 'resume', maxCount: 1 },
     { name: 'jobDescription', maxCount: 1 }
@@ -17,7 +24,14 @@ router.post(
 
 // Get detailed feedback for specific section
 router.get(
-  '/feedback/:analysisId/:section',
+   '/feedback/:analysisId/:section',
+  (req, res, next) => {
+    logger.info('Feedback request received', {
+      analysisId: req.params.analysisId,
+      section: req.params.section,
+    });
+    next();
+  },
   resumeController.getDetailedFeedback
 );
 
