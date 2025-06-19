@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const logger = require('./utils/logger');
 
 const resumeRoutes = require('./routes/resumeRoutes');
 const errorHandler = require('./middleware/errorHandler');
@@ -19,7 +19,10 @@ app.use(cors({
 }));
 
 // Request logging
-app.use(morgan('dev'));
+app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.url}`);
+    next();
+});
 
 // Body parsing
 app.use(express.json());

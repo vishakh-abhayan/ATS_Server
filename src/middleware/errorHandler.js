@@ -1,5 +1,5 @@
-const errorHandler = (err, req, res, next) => {
-  console.error('Error:', err);
+const logger = require('../utils/logger');
+  logger.error(`${err.status || 500} - ${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
 
   // Azure OpenAI specific errors
   if (err.code === 'ResourceNotFound') {
