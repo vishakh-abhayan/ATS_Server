@@ -1,14 +1,14 @@
 const documentParser = require('../services/documentParser');
 const azureOpenAI = require('../services/azureOpenAIService');
 const cacheService = require('../services/cacheService');
-const { v4: uuidv4 } = require('uuid');
+const logger = require('../utils/logger');
 
 const analyzeResume = async (req, res, next) => {
   const analysisId = uuidv4();
   
   try {
     // Log analysis start
-    console.log(`Starting analysis: ${analysisId}`);
+    logger.info(`Starting analysis: ${analysisId}`);
     
     // Extract files and text
     const resumeFile = req.files['resume']?.[0];
@@ -22,7 +22,7 @@ const analyzeResume = async (req, res, next) => {
       });
     }
 
-    console.log(`Resume file received: ${resumeFile.originalname} (${resumeFile.size} bytes)`);
+    logger.info(`Resume file received: ${resumeFile.originalname} (${resumeFile.size} bytes)`);
 
     // Parse resume
     const resumeText = await documentParser.parseDocument(resumeFile);
@@ -40,7 +40,7 @@ const analyzeResume = async (req, res, next) => {
     const cachedResult = await cacheService.get(cacheKey);
     
     if (cachedResult) {
-      console.log(`Returning cached result: ${analysisId}`);
+      logger.info(`Returning cached result: ${analysisId}`);
       return res.json({
         ...cachedResult,
         analysisId,
@@ -49,7 +49,7 @@ const analyzeResume = async (req, res, next) => {
     }
 
     // Perform AI analysis
-    console.log(`Starting AI analysis: ${analysisId}`);
+    logger.info(`Starting AI analysis: ${analysisId}`);
     const startTime = Date.now();
     
     const analysis = await azureOpenAI.analyzeResume(resumeText, jobDescription);
@@ -58,7 +58,7 @@ const analyzeResume = async (req, res, next) => {
     const industryInsights = await azureOpenAI.generateIndustryInsights(resumeText);
     
     const analysisTime = Date.now() - startTime;
-    console.log(`AI analysis completed in ${analysisTime}ms: ${analysisId}`);
+    logger.info(`AI analysis completed in ${analysisTime}ms: ${analysisId}`);
 
     // Prepare comprehensive response
     const response = {
@@ -104,7 +104,7 @@ const analyzeResume = async (req, res, next) => {
 
     res.json(response);
   } catch (error) {
-    console.error(`Analysis failed: ${analysisId}`, error);
+    logger.error(`Analysis failed: ${analysisId}`, error);
     next(error);
   }
 };
@@ -152,8 +152,51 @@ const generateOptimizedResume = async (req, res, next) => {
   }
 };
 
+const getIndustryInsights = async (req, res, next) => {
+  try {
+    const resumeText = await documentParser.parseDocument(req.file);
+    const insights = await azureOpenAI.generateIndustryInsights(
+      resumeText,
+      req.body.industry
+    );
+    res.json(insights);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const batchAnalyzeResumes = async (req, res, next) => {
+  try {
+    const jobDescription = req.body.jobDescription;
+    const analyses = await Promise.all(
+      req.files.map(async (file) => {
+        const resumeText = await documentParser.parseDocument(file);
+        const analysis = await azureOpenAI.analyzeResume(resumeText, jobDescription);
+        return {
+          filename: file.originalname,
+          score: analysis.scores.overall,
+          summary: analysis.executive_summary,
+        };
+      })
+    );
+    res.json({
+      analyses,
+      summary: {
+        total: analyses.length,
+        average_score:
+          analyses.reduce((sum, a) => sum + a.score, 0) / analyses.length,
+        top_candidates: analyses.sort((a, b) => b.score - a.score).slice(0, 3),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   analyzeResume,
   getDetailedFeedback,
-  generateOptimizedResume
+  generateOptimizedResume,
+  getIndustryInsights,
+  batchAnalyzeResumes,
 };

@@ -37,13 +37,26 @@ router.get(
 
 // Generate optimized resume content
 router.post(
-  '/optimize',
+   '/optimize',
+  (req, res, next) => {
+    logger.info('Optimization request received', {
+      body: req.body,
+    });
+    next();
+  },
   resumeController.generateOptimizedResume
 );
 
 // Get industry insights
 router.post(
-  '/industry-insights',
+   '/industry-insights',
+  (req, res, next) => {
+    logger.info('Industry insights request received', {
+      file: req.file,
+      body: req.body,
+    });
+    next();
+  },
   uploadMiddleware.single('resume'),
   async (req, res, next) => {
     try {
@@ -65,7 +78,14 @@ router.post(
 
 // Batch analysis endpoint for multiple resumes
 router.post(
-  '/batch-analyze',
+   '/batch-analyze',
+  (req, res, next) => {
+    logger.info('Batch analysis request received', {
+      files: req.files,
+      body: req.body,
+    });
+    next();
+  },
   uploadMiddleware.array('resumes', 10),
   async (req, res, next) => {
     try {
