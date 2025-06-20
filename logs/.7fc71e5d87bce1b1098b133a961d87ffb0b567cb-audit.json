@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "/home/vicky/ATS_Backend/logs/.7fc71e5d87bce1b1098b133a961d87ffb0b567cb-audit.json",
+    "files": [
+        {
+            "date": 1750431605569,
+            "name": "/home/vicky/ATS_Backend/logs/analysis-2025-06-20.log",
+            "hash": "1bb1a766dac161b5934f72fc0e59103a5ae51cefcb29dccbf0d7c0203d1cdbfa"
+        }
+    ],
+    "hashType": "sha256"
+}

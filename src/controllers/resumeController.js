@@ -1,14 +1,20 @@
 const documentParser = require('../services/documentParser');
 const azureOpenAI = require('../services/azureOpenAIService');
 const cacheService = require('../services/cacheService');
+const logger = require('../config/logger');
 const { v4: uuidv4 } = require('uuid');
 
 const analyzeResume = async (req, res, next) => {
   const analysisId = uuidv4();
+  const startTime = Date.now();
   
   try {
-    // Log analysis start
-    console.log(`Starting analysis: ${analysisId}`);
+    logger.analysis('Starting resume analysis', {
+      requestId: req.requestId,
+      analysisId,
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
     
     // Extract files and text
     const resumeFile = req.files['resume']?.[0];
@@ -16,53 +22,131 @@ const analyzeResume = async (req, res, next) => {
     const jobDescText = req.body.jobDescriptionText;
 
     if (!resumeFile) {
+      logger.warn('Resume analysis failed - no file provided', {
+        requestId: req.requestId,
+        analysisId
+      });
+      
       return res.status(400).json({ 
         error: 'Resume file is required',
-        analysisId 
+        analysisId,
+        requestId: req.requestId
       });
     }
 
-    console.log(`Resume file received: ${resumeFile.originalname} (${resumeFile.size} bytes)`);
+    logger.analysis('Resume file received', {
+      requestId: req.requestId,
+      analysisId,
+      filename: resumeFile.originalname,
+      fileSize: resumeFile.size,
+      mimeType: resumeFile.mimetype
+    });
 
     // Parse resume
+    const parseStartTime = Date.now();
     const resumeText = await documentParser.parseDocument(resumeFile);
+    const parseTime = Date.now() - parseStartTime;
+    
+    logger.performance('Document parsing completed', {
+      requestId: req.requestId,
+      analysisId,
+      parseTime,
+      textLength: resumeText.length,
+      wordCount: resumeText.split(/\s+/).length
+    });
     
     // Parse job description
     let jobDescription = '';
     if (jobDescFile) {
+      const jobParseStartTime = Date.now();
       jobDescription = await documentParser.parseDocument(jobDescFile);
+      const jobParseTime = Date.now() - jobParseStartTime;
+      
+      logger.analysis('Job description file parsed', {
+        requestId: req.requestId,
+        analysisId,
+        jobParseTime,
+        jobDescLength: jobDescription.length
+      });
     } else if (jobDescText) {
       jobDescription = jobDescText;
+      logger.analysis('Job description text provided', {
+        requestId: req.requestId,
+        analysisId,
+        jobDescLength: jobDescription.length
+      });
     }
 
     // Check cache first
     const cacheKey = `analysis:${Buffer.from(resumeText + jobDescription).toString('base64').substring(0, 32)}`;
+    const cacheStartTime = Date.now();
     const cachedResult = await cacheService.get(cacheKey);
+    const cacheTime = Date.now() - cacheStartTime;
     
     if (cachedResult) {
-      console.log(`Returning cached result: ${analysisId}`);
+      logger.analysis('Returning cached analysis result', {
+        requestId: req.requestId,
+        analysisId,
+        cacheTime,
+        totalTime: Date.now() - startTime
+      });
+      
       return res.json({
         ...cachedResult,
         analysisId,
+        requestId: req.requestId,
         cached: true
       });
     }
 
+    logger.analysis('Starting AI analysis - cache miss', {
+      requestId: req.requestId,
+      analysisId,
+      cacheTime
+    });
+
     // Perform AI analysis
-    console.log(`Starting AI analysis: ${analysisId}`);
-    const startTime = Date.now();
-    
+    const aiStartTime = Date.now();
     const analysis = await azureOpenAI.analyzeResume(resumeText, jobDescription);
+    const aiAnalysisTime = Date.now() - aiStartTime;
+    
+    logger.performance('AI analysis completed', {
+      requestId: req.requestId,
+      analysisId,
+      aiAnalysisTime,
+      overallScore: analysis.scores.overall
+    });
     
     // Get industry insights
+    const insightsStartTime = Date.now();
     const industryInsights = await azureOpenAI.generateIndustryInsights(resumeText);
+    const insightsTime = Date.now() - insightsStartTime;
     
-    const analysisTime = Date.now() - startTime;
-    console.log(`AI analysis completed in ${analysisTime}ms: ${analysisId}`);
+    logger.performance('Industry insights generated', {
+      requestId: req.requestId,
+      analysisId,
+      insightsTime,
+      detectedIndustry: industryInsights.detected_industry
+    });
+
+    const totalAnalysisTime = Date.now() - startTime;
+    
+    logger.analysis('Complete analysis finished', {
+      requestId: req.requestId,
+      analysisId,
+      totalAnalysisTime,
+      breakdown: {
+        parseTime,
+        aiAnalysisTime,
+        insightsTime,
+        cacheTime
+      }
+    });
 
     // Prepare comprehensive response
     const response = {
       analysisId,
+      requestId: req.requestId,
       overall_score: analysis.scores.overall,
       score_breakdown: {
         content_analysis: {
@@ -94,17 +178,41 @@ const analyzeResume = async (req, res, next) => {
       metadata: {
         analysis_version: '2.0',
         ai_model: 'Azure OpenAI GPT-4',
-        analysis_time: analysisTime,
+        analysis_time: totalAnalysisTime,
         word_count: resumeText.split(/\s+/).length
       }
     };
 
     // Cache the result
+    const setCacheStartTime = Date.now();
     await cacheService.set(cacheKey, response, 3600); // Cache for 1 hour
+    const setCacheTime = Date.now() - setCacheStartTime;
+    
+    logger.performance('Analysis result cached', {
+      requestId: req.requestId,
+      analysisId,
+      setCacheTime
+    });
+
+    logger.analysis('Analysis successfully completed and returned', {
+      requestId: req.requestId,
+      analysisId,
+      totalTime: Date.now() - startTime,
+      score: analysis.scores.overall
+    });
 
     res.json(response);
   } catch (error) {
-    console.error(`Analysis failed: ${analysisId}`, error);
+    const errorTime = Date.now() - startTime;
+    
+    logger.error('Resume analysis failed', {
+      requestId: req.requestId,
+      analysisId,
+      error: error.message,
+      stack: error.stack,
+      errorTime
+    });
+    
     next(error);
   }
 };
@@ -113,17 +221,42 @@ const getDetailedFeedback = async (req, res, next) => {
   try {
     const { analysisId, section } = req.params;
     
-    // This endpoint could provide more detailed feedback for specific sections
-    // You could store the full analysis in Redis and retrieve specific parts
+    logger.api('Detailed feedback requested', {
+      requestId: req.requestId,
+      analysisId,
+      section
+    });
     
     const feedback = await cacheService.get(`analysis:${analysisId}:${section}`);
     
     if (!feedback) {
-      return res.status(404).json({ error: 'Analysis not found' });
+      logger.warn('Analysis not found for detailed feedback', {
+        requestId: req.requestId,
+        analysisId,
+        section
+      });
+      
+      return res.status(404).json({ 
+        error: 'Analysis not found',
+        requestId: req.requestId
+      });
     }
+    
+    logger.api('Detailed feedback returned', {
+      requestId: req.requestId,
+      analysisId,
+      section
+    });
     
     res.json(feedback);
   } catch (error) {
+    logger.error('Failed to get detailed feedback', {
+      requestId: req.requestId,
+      analysisId: req.params.analysisId,
+      section: req.params.section,
+      error: error.message
+    });
+    
     next(error);
   }
 };
@@ -131,6 +264,13 @@ const getDetailedFeedback = async (req, res, next) => {
 const generateOptimizedResume = async (req, res, next) => {
   try {
     const { resumeText, jobDescription, improvements } = req.body;
+    
+    logger.analysis('Optimized resume generation requested', {
+      requestId: req.requestId,
+      resumeLength: resumeText?.length,
+      jobDescLength: jobDescription?.length,
+      improvementsCount: improvements?.length
+    });
     
     // This could use AI to generate an optimized version of the resume
     const prompt = `
@@ -146,8 +286,20 @@ const generateOptimizedResume = async (req, res, next) => {
     // Call Azure OpenAI to generate optimized content
     // Implementation depends on your specific needs
     
-    res.json({ optimizedText: 'Optimized resume content...' });
+    logger.analysis('Optimized resume generated', {
+      requestId: req.requestId
+    });
+    
+    res.json({ 
+      optimizedText: 'Optimized resume content...',
+      requestId: req.requestId
+    });
   } catch (error) {
+    logger.error('Failed to generate optimized resume', {
+      requestId: req.requestId,
+      error: error.message
+    });
+    
     next(error);
   }
 };
